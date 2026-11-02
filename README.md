@@ -1,10 +1,12 @@
 # UU Link
 
-通用 TCP + UDP 端口转发工具。macOS 软件管理连接与多条映射，Linux 服务端接收转发；两端使用同一个 UU 账号。当前预览版 **v0.3.1**，协议引擎 **0.5.0-portmap-exp1**。
+通用 TCP + UDP 端口转发工具。macOS 软件管理连接与多条映射，Linux 服务端接收转发；两端使用同一个 UU 账号。桌面客户端 **v0.3.2**，Linux 安装脚本固定 **v0.3.1**，协议引擎 **0.5.0-portmap-exp1**。
 
 ## macOS
 
-在 [Releases](https://github.com/ct-jyjntc/uulink/releases/tag/v0.3.1) 下载 `UU-Link-0.3.1-macos-arm64.zip`，解压后打开 UU Link。支持 Apple Silicon，声明最低 macOS 13；本机构建使用 ad-hoc 签名，未做 Apple 公证，其他 Mac 安装仍需实测。
+在 [Releases](https://github.com/ct-jyjntc/uulink/releases/tag/v0.3.2) 下载 `UU-Link-0.3.2-macos-arm64.zip`，解压后打开 UU Link。支持 Apple Silicon，声明最低 macOS 13；本机构建使用 ad-hoc 签名，未做 Apple 公证，其他 Mac 安装仍需实测。
+
+0.3.2 修正右上角和侧栏齿轮图标的比例、居中与裁切，保留正确的 24×24 图标画布。
 
 0.3.1 修复首次登录设备注册缺少 `mac` 导致的 HTTP 422；重新设计图标，修正透明留白和显示占比。支持默认 TCP+UDP、多个映射并行、每条规则的局域网开关、真实 UU RTT、系统主题、登录自启和防休眠。
 
