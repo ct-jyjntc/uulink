@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>UU Link 安装</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">
+        <img src="/icon.svg" width="24" height="24" alt="" /><span>UU Link</span
+        ><span class="caption">安装向导</span>
+      </div>
+      <div class="window-controls">
+        <button data-window="minimize" aria-label="最小化">
+          <svg viewBox="0 0 12 12"><path d="M1 6.5h10" /></svg></button
+        ><button data-window="close" aria-label="关闭安装向导">
+          <svg viewBox="0 0 12 12"><path d="m2 2 8 8m0-8-8 8" /></svg>
+        </button>
+      </div>
+    </header>
+    <div class="layout">
+      <aside>
+        <div class="product">
+          <img src="/icon.svg" width="72" height="72" alt="" />
+          <h1>UU Link</h1>
+          <p>Windows 版</p>
+        </div>
+        <ol class="steps" aria-label="安装步骤">
+          <li class="active" data-step="ready"><span>1</span>准备安装</li>
+          <li data-step="installing"><span>2</span>安装应用</li>
+          <li data-step="done"><span>3</span>完成</li>
+        </ol>
+        <div class="version">0.3.5 <span>·</span> x64</div>
+      </aside>
+      <main>
+        <section id="ready">
+          <span class="eyebrow">欢迎使用</span>
+          <h2>安装 UU Link</h2>
+          <p class="description">
+            连接设备，将远端 TCP 与 UDP 服务映射到本机。
+          </p>
+          <div class="features">
+            <div>
+              <svg viewBox="0 0 24 24">
+                <path d="M4 8h16m-4-4 4 4-4 4M20 16H4m4-4-4 4 4 4" /></svg
+              ><span>TCP + UDP</span>
+            </div>
+            <div>
+              <svg viewBox="0 0 24 24">
+                <rect x="3" y="5" width="18" height="14" rx="3" />
+                <path d="M3 10h18" /></svg
+              ><span>托盘后台运行</span>
+            </div>
+          </div>
+          <div class="location">
+            <div class="location-head">
+              <label for="install-path">安装位置</label
+              ><button class="text" id="change-path">更改</button>
+            </div>
+            <input
+              id="install-path"
+              spellcheck="false"
+              aria-label="安装位置"
+              readonly
+            />
+            <p id="install-note">安装到当前 Windows 用户目录。</p>
+          </div>
+          <div class="error" id="ready-error" role="alert" hidden></div>
+          <footer>
+            <p class="note" id="existing-note">准备就绪后即可开始安装。</p>
+            <button class="primary" id="install">
+              安装 UU Link <span aria-hidden="true">→</span>
+            </button>
+          </footer>
+        </section>
+        <section id="installing" hidden aria-live="polite">
+          <span class="eyebrow">安装进度</span>
+          <h2>正在安装 UU Link</h2>
+          <p class="description">正在将 UU Link 安装到你的电脑。</p>
+          <div class="progress-card">
+            <div class="spinner" aria-hidden="true"></div>
+            <h3 id="progress-message">正在准备安装文件</h3>
+            <div class="progress" role="progressbar" aria-label="安装正在进行">
+              <span></span>
+            </div>
+            <p class="note">安装完成后将自动进入下一步。</p>
+          </div>
+        </section>
+        <section id="done" hidden>
+          <div class="success" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg>
+          </div>
+          <h2>安装完成</h2>
+          <p class="description">UU Link 已准备就绪。</p>
+          <div class="done-card">
+            <p><span aria-hidden="true">✓</span> 已添加到开始菜单</p>
+            <p>
+              <span aria-hidden="true">✓</span> 支持关闭窗口后在托盘继续运行
+            </p>
+          </div>
+          <div class="error" id="done-error" role="alert" hidden></div>
+          <footer>
+            <label class="launch"
+              ><input type="checkbox" id="launch" checked />打开 UU Link</label
+            ><button class="primary" id="finish">完成</button>
+          </footer>
+        </section>
+        <section id="error" hidden>
+          <span class="eyebrow">安装状态</span>
+          <h2>安装未完成</h2>
+          <p class="description" id="error-message" role="alert"></p>
+          <div class="location">
+            <label>安装位置</label>
+            <p class="path" id="error-path"></p>
+          </div>
+          <footer>
+            <button class="secondary" data-window="close">关闭</button
+            ><button class="primary" id="retry">重试</button>
+          </footer>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

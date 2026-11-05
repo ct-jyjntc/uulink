@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"slices"
 )
 
 const version = "0.3.5"
@@ -16,13 +17,18 @@ var errUnsupportedPlatform = errors.New("Windows 版仅提供端口转发控制�
 func main() {
 	if err := runWindowsCLI(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "UU Link:", err)
-		windowsError(err.Error())
+		if !windowsSetupMode || !slices.Contains(os.Args[1:], "/S") {
+			windowsError(err.Error())
+		}
 		os.Exit(1)
 	}
 }
 func runWindowsCLI(args []string) error {
+	if windowsSetupMode {
+		return runWindowsEntry()
+	}
 	if len(args) == 0 {
-		return runWindowsWindow()
+		return runWindowsEntry()
 	}
 	switch args[0] {
 	case "network-check":

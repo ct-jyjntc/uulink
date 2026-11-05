@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -125,6 +126,11 @@ func atomicControllerJSON(path string, v any) error {
 	}
 	if e = os.Rename(f.Name(), path); e != nil {
 		return e
+	}
+	// Windows does not support flushing a directory handle opened by os.Open.
+	// The file contents were flushed before the atomic replacement above.
+	if runtime.GOOS == "windows" {
+		return nil
 	}
 	d, e := os.Open(dir)
 	if e != nil {

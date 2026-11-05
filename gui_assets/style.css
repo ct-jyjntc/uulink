@@ -7,11 +7,42 @@
 #nav > .thumb{position:absolute;pointer-events:none;transition:left .18s var(--ease),width .18s var(--ease)}.uu-license{font:11px/1.7 var(--code);white-space:pre-wrap;overflow-wrap:anywhere;user-select:text;margin:0}#main{scrollbar-gutter:stable}body.web .top .brand,body.win-desktop .top .brand{display:flex}
 body.win-desktop{--font:"Segoe UI","Microsoft YaHei UI",system-ui,sans-serif}
 
+/* Windows draws its controls inside the app header, sharing its background. */
+body.win-desktop{--win-header-height:48px;--win-control-size:32px}
+body.win-desktop :is(.top,.side-top){height:var(--win-header-height);gap:8px;user-select:none}
+body.win-desktop .top{padding-right:8px}
+body.win-desktop:not(.side-nav) .top{padding-left:10px}
+body.win-desktop .side-top{padding-left:10px;padding-right:12px}
+body.win-desktop :is(.top,.side-top){app-region:drag;-webkit-app-region:drag}
+body.win-desktop :is(.top,.side-top) :is(button,button *,a,input,select,textarea,[role="separator"]){app-region:no-drag;-webkit-app-region:no-drag}
+body.win-desktop:not(.side-nav) .top #brand{display:flex}
+body.win-desktop .brand{gap:6px;font-size:13px;font-weight:600;letter-spacing:0}
+body.win-desktop .brand .logo{display:inline-flex;align-items:center}
+body.win-desktop .brand .logo img{display:block;width:22px;height:22px}
+body.win-desktop.side-nav .top .crumb{font-size:13px;font-weight:500;color:var(--fg-2)}
+body.win-desktop :is(.top,.side-top) .icon{display:grid;place-items:center;width:var(--win-control-size);height:var(--win-control-size);padding:0;border-radius:7px;color:var(--fg-2)}
+body.win-desktop :is(.top,.side-top) .icon .uu-glyph{--glyph-size:15px}
+body.win-desktop .top .actions{align-items:center;gap:4px}
+body.win-desktop .sidebar{border-right:0}
+body.win-desktop .sidebar::after{content:"";position:absolute;top:var(--win-header-height);right:0;bottom:0;width:1px;background:var(--line-2);pointer-events:none}
+.win-caption-controls{display:flex;align-items:center;align-self:center;gap:4px;flex:none;margin-left:12px;padding-left:12px;position:relative}
+.win-caption-controls::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:1px;background:var(--line)}
+.win-caption-controls button{display:grid;place-items:center;width:var(--win-control-size);height:var(--win-control-size);padding:0;border:0;border-radius:7px;background:transparent;color:var(--fg-2);box-shadow:none}
+.win-caption-controls button:hover{background:var(--pill-hover)}
+.win-caption-controls button[data-window-command="close"]:hover{background:#c42b1c;color:white}
+.win-caption-controls svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.2;pointer-events:none}
+.win-caption-controls .win-restore{display:none}
+.win-maximized .win-caption-controls .win-maximize{display:none}
+.win-maximized .win-caption-controls .win-restore{display:block}
+
+
 body.window footer.foot.uu-foot{position:static;width:auto;height:auto;min-height:26px;padding:0 16px;overflow:hidden;border-top:1px solid var(--line-2);gap:12px}#footer-host{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#footer-update{flex:none;white-space:nowrap}.uu-alert#panel-error{flex:none;margin:0 16px 5px}
 
 /* Native <dialog> owns its layout; Magpie's .editor grid is for label/value siblings. */
 dialog.uu-dialog{position:fixed;inset:58px 16px 16px;margin:auto;box-sizing:border-box;width:min(480px,calc(100vw - 32px));min-width:0;max-width:none;height:fit-content;max-height:calc(100dvh - 86px);padding:0;overflow:hidden}
 dialog.uu-dialog[open]{display:flex;flex-direction:column}
+body.win-desktop dialog.uu-dialog::backdrop{border-radius:8px}
+body.win-desktop.win-maximized dialog.uu-dialog::backdrop{border-radius:0}
 .uu-dialog-head{flex:none;margin:0;padding:17px 20px 14px;border-bottom:1px solid var(--line-2);align-items:center}
 .uu-dialog-head .icon{width:28px;height:28px}
 .uu-form-body{display:block;min-height:0;min-width:0;overflow-y:auto;overscroll-behavior:contain;padding:16px 20px 20px}
