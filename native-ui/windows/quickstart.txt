@@ -1,0 +1,16 @@
+UU Link 0.3.5 · Windows x64 预览
+
+适用于 Windows 10/11 x64，作为 TCP/UDP 通用端口转发控制端。
+安装版从开始菜单打开 UU Link。便携版完整解压后双击 UU Link.exe，
+请将 UU Link.exe 与 uulink-engine.exe 放在同一目录。
+需要 Microsoft Edge WebView2 Runtime。安装版会在缺失时联网安装；
+便携版需要时请从 Microsoft 下载：https://developer.microsoft.com/microsoft-edge/webview2/
+
+映射默认 TCP + UDP，可单独选择 TCP 或 UDP。允许局域网访问默认关闭；
+开启时请按需在 Windows 防火墙中仅允许你信任的专用网络。
+通用 UDP 和设备延迟探测要求远端支持 UU Link 协议。
+UU 联网流量要求可用的物理 IPv4 以太网或 Wi-Fi，不回退到代理。
+关闭窗口退出软件，转发也会停止。设置可启用登录时启动、防止自动休眠。
+数据保存在 %LOCALAPPDATA%\UU Link；卸载程序保留本机账户和映射配置。
+
+此预览包未签名。Windows 上的安装、登录和真实转发有待实机验收。

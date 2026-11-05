@@ -1,0 +1,10 @@
+/dist/
+/releases/
+/evidence/
+/.tools/
+/session.json
+/controller.json
+/controlled.json
+/rules.json
+.env
+.DS_Store

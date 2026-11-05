@@ -2,6 +2,12 @@
 
 通用 TCP + UDP 端口转发工具。macOS 软件管理连接与多条映射，Linux 服务端接收转发；两端使用同一个 UU 账号。桌面客户端 **v0.3.2**，Linux 安装脚本固定 **v0.3.1**，协议引擎 **0.5.0-portmap-exp1**。
 
+## Windows x64 预览
+
+[安装版、便携版和校验文件](https://github.com/ct-jyjntc/uulink/releases/tag/v0.3.5-windows.1) · [构建与 Windows 实机验收清单](native-ui/windows/README.md)
+
+Windows 版沿用通用 TCP/UDP 映射、每条规则的局域网开关、设备列表和隧道延迟。它是控制端，适用于 Windows 10/11 x64。首次预览未签名，Windows 安装、短信登录、转发和退出清理等待实机验收。
+
 ## macOS
 
 在 [Releases](https://github.com/ct-jyjntc/uulink/releases/tag/v0.3.2) 下载 `UU-Link-0.3.2-macos-arm64.zip`，解压后打开 UU Link。支持 Apple Silicon，声明最低 macOS 13；本机构建使用 ad-hoc 签名，未做 Apple 公证，其他 Mac 安装仍需实测。
