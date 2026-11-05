@@ -125,7 +125,7 @@ func runController(ctx context.Context, device, listen, target string, relay boo
 }
 func runControllerRules(ctx context.Context, device string, relay bool, rules func() ([]forwardRule, error), report func(map[string]string), latency ...func(time.Duration)) error {
 	var room signalingRoom
-	if err := api(ctx, "/api/v1/room/join/by_device/"+device, []byte(`{"force_join":false}`), &room); err != nil {
+	if err := api(ctx, controllerJoinPrefix+device, []byte(`{"force_join":false}`), &room); err != nil {
 		return err
 	}
 	if room.Token == "" || room.Server == "" {

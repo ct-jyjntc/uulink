@@ -221,6 +221,7 @@ func (g *guiServer) service() guiService {
 			s.State = "measuring"
 		}
 		s.PID = r.cmd.Process.Pid
+		s.started = r.started
 	}
 	s.Error = r.lastError
 	return s

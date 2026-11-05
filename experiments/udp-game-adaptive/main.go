@@ -24,6 +24,16 @@ import (
 var apiClient = &http.Client{Timeout: 15 * time.Second, Transport: providerHTTPTransport()}
 var linuxBearer string
 
+type providerAPIError struct {
+	path         string
+	status, code int
+	message      string
+}
+
+func (e *providerAPIError) Error() string {
+	return fmt.Sprintf("%s HTTP=%d code=%d msg=%s", e.path, e.status, e.code, e.message)
+}
+
 func api(ctx context.Context, path string, body []byte, out any) error {
 	return apiRequest(ctx, "POST", path, body, out)
 }
@@ -57,7 +67,7 @@ func apiRequest(ctx context.Context, method, path string, body []byte, out any) 
 		return err
 	}
 	if resp.StatusCode != 200 || envelope.Code != 0 {
-		return fmt.Errorf("%s HTTP=%d code=%d msg=%s", path, resp.StatusCode, envelope.Code, envelope.Msg)
+		return &providerAPIError{path, resp.StatusCode, envelope.Code, envelope.Msg}
 	}
 	if out != nil {
 		return json.Unmarshal(envelope.Data, out)

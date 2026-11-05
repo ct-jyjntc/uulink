@@ -106,7 +106,7 @@ func controllerWorkerCLI(args []string) error {
 				configureResources(runtimeConfig)
 				configured = true
 			}
-			e = runControllerRules(ctx, o.device, true, source, func(states map[string]string) { report.set("已连接", "", states) }, report.latency)
+			e = runControllerRules(ctx, o.device, true, source, report.connected, report.latency)
 		}
 		if ctx.Err() != nil {
 			return nil
@@ -115,6 +115,7 @@ func controllerWorkerCLI(args []string) error {
 		if e != nil {
 			detail = e.Error()
 		}
+		report.recordAttemptEnd(o.device, e)
 		report.set("等待重连", detail, nil)
 		log.Printf("session ended: %s; retry in 5s", detail)
 		select {

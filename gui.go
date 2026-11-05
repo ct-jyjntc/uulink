@@ -60,6 +60,7 @@ type guiService struct {
 	State, Manager, Name, Error string
 	PID                         int
 	Installed, AutoStart        bool
+	started                     time.Time
 }
 type guiMapping struct {
 	forwardRule
@@ -71,6 +72,7 @@ type guiSnapshot struct {
 	Connection                        guiConnectionConfig
 	Network                           providerNetworkInfo
 	Latencies                         map[string]tunnelLatency
+	DeviceConnections                 map[string]guiDeviceConnection
 	Roles                             []guiRole
 	Service                           guiService
 	Mappings                          []guiMapping
@@ -655,7 +657,26 @@ func (g *guiServer) snapshot() guiSnapshot {
 		s.RulesError = "规则文件读取失败，现有文件不会被覆盖"
 	}
 	daemon := readControllerStatus(filepath.Join(g.opts.controllerState, "daemon.json"))
-	s.ControllerRunning = s.Service.State == "running" && daemon.State != "状态未更新" && daemon.State != "已停止"
+	daemonLive := !s.Service.started.IsZero() && !daemon.Updated.Before(s.Service.started) && strings.HasPrefix(daemon.State, "运行中，")
+	s.ControllerRunning = s.Service.State == "running" && daemonLive
+	reports := map[string]controllerStatus{}
+	if daemonLive {
+		wanted := activeProbeRequests(filepath.Join(g.opts.controllerState, "probes.json"))
+		if s.ControllerRunning {
+			for _, rule := range d.Rules {
+				if rule.Enabled && safeControllerID.MatchString(rule.Device) {
+					wanted[rule.Device] = time.Time{}
+				}
+			}
+		}
+		for device := range wanted {
+			report := readControllerStatus(filepath.Join(g.opts.controllerState, device+".json"))
+			if !report.Updated.Before(s.Service.started) {
+				reports[device] = report
+			}
+		}
+	}
+	s.DeviceConnections = readDeviceConnections(g.opts.controllerState, reports, s.Time)
 	for _, v := range d.Rules {
 		st := "已停用"
 		if v.Enabled {
@@ -664,7 +685,10 @@ func (g *guiServer) snapshot() guiSnapshot {
 				st = s.Service.Error
 			}
 			if s.ControllerRunning {
-				report := readControllerStatus(filepath.Join(g.opts.controllerState, v.Device+".json"))
+				report, ok := reports[v.Device]
+				if !ok {
+					report.State = "状态未更新"
+				}
 				st = report.State
 				if report.Error != "" {
 					st = report.Error

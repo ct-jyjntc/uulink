@@ -65,6 +65,15 @@ function mappingTable(compact=false){const rows=compact?state.Mappings.slice(0,4
 function mappingsView(){return heading('映射','',`<button class="text" data-action="new-rule">${icon('plus')}<span>添加映射</span></button>`)+(state.RulesError?`<div class="uu-alert">${icon('shield')}<p>${esc(state.RulesError)}</p></div>`:'')+mappingTable();}
 function deviceLatency(id){const point=state.Latencies?.[id],pending=latencyPending.get(id);if(pending&&point&&new Date(point.updated).getTime()>=pending){latencyPending.delete(id);}if(latencyPending.has(id)){if(Date.now()-pending<30000)return '测量中…';latencyPending.delete(id);return '未测得';}return point?`${Date.now()-new Date(point.updated).getTime()>15000?'上次 ':''}${Math.round(point.ms)} ms`:'未测量';}
 function latencyTitle(id){const p=state.Latencies?.[id];return p?`UU 隧道往返延迟 · ${new Date(p.updated).toLocaleTimeString('zh-CN',{hour12:false})}`:'UU 隧道往返延迟';}
+function deviceConnection(id){
+ const c=state.DeviceConnections?.[id];
+ if(c?.state==='local_connected')return badge('本机已连接','good');
+ if(c?.state==='recently_busy'){
+  const time=new Date(c.observed_at).toLocaleTimeString('zh-CN',{hour12:false});
+  return `<span title="${esc('UU 最近一次拒绝连接：'+time)}">${badge('上次连接因设备被占用而失败','wait')}</span>`;
+ }
+ return '';
+}
 function deviceOnline(d){return ['online','connected','active','available'].includes(String(d?.status||'').trim().toLowerCase());}
 function selectDeviceFilter(value){if(!['online','offline'].includes(value))return;deviceFilter=value;render();}
 function devicesView(){
@@ -75,7 +84,7 @@ function devicesView(){
  const content=filtered.length?`<div class="list">${filtered.map(d=>{
   const id=esc(d.device_id),online=deviceOnline(d),raw=String(d.status||'').trim().toLowerCase(),label=online?'在线':['offline','disconnected'].includes(raw)?'离线':'状态未知';
   const latency=online?`<span class="uu-device-latency" data-device-latency="${id}" title="${esc(latencyTitle(d.device_id))}">${deviceLatency(d.device_id)}</span><button class="text" id="latency-${id}" data-measure="${id}" aria-label="测量 ${esc(d.alias||d.device_id)} 的隧道延迟" ${latencyPending.has(d.device_id)||latencyRequests.has(d.device_id)?'disabled':''}>测延迟</button>`:'';
-  return row('server',d.alias||'未命名设备','',`${latency}${badge(label,online?'good':'')}<button class="icon" data-copy="${id}" aria-label="复制设备 ID">${icon('copy')}</button><button class="text action" data-device-rule="${id}">添加映射…</button>`,'uu-device-row');
+  return row('server',d.alias||'未命名设备',deviceConnection(d.device_id),`${latency}${badge(label,online?'good':'')}<button class="icon" data-copy="${id}" aria-label="复制设备 ID">${icon('copy')}</button><button class="text action" data-device-rule="${id}">添加映射…</button>`,'uu-device-row');
  }).join('')}</div>`:empty(loadingDevices?'正在读取设备':deviceError?'暂时无法读取设备':devices?`暂无${deviceFilter==='online'?'在线':'离线'}设备`:'尚未读取设备','','');
  return html+`<div id="device-list" role="tabpanel" aria-labelledby="devices-${deviceFilter}" tabindex="0">${content}</div>`;
 }
@@ -88,7 +97,7 @@ function settingsView(){
  if(settingTab==='general')return tabs+section('外观',row('sun','主题','',`<div class="warm-tabs">${['system','light','dark'].map((t,i)=>`<button data-theme="${t}" class="${theme===t?'on':''}">${['跟随系统','浅色','深色'][i]}</button>`).join('')}</div>`))+(state.Network?.Enforced?section('网络',row('shield','物理网卡直连','',`<span class="uu-value" title="${esc(state.Network.Error||state.Network.Address)}">${state.Network.Error?'无可用网卡':esc((state.Network.Name||state.Network.Interface)+' · '+state.Network.Interface)}</span>`,'uu-physical-network')):'')+section('启动与运行',row('play','登录时启动','',settingSwitch('login','登录时启动',nativePrefs?.login,!nativePrefs))+(nativePrefs?.loginApproval?row('shield','等待系统允许','',`<button class="text action" data-action="login-settings">打开登录项设置</button>`):'')+row('link','打开时连接','',`<button class="uu-toggle ${state.Connection.connect_on_open?'on':''}" role="switch" aria-checked="${state.Connection.connect_on_open}" aria-label="打开时连接" data-action="connect-on-open"></button>`)+row('awake','防止自动休眠','',settingSwitch('awake','防止自动休眠',nativePrefs?.awake,!nativePrefs))+(!windowsDesktop?row('dock','在 Dock 中显示图标','',settingSwitch('dock','在 Dock 中显示图标',nativePrefs?.dock,!nativePrefs)):'')+row('window','关闭窗口后继续运行',windowsDesktop?'关闭后留在系统托盘，转发保持运行':'',settingSwitch('menuBar','关闭窗口后继续运行',nativePrefs?.menuBar,!nativePrefs)));
  return tabs+(windowsDesktop?section('应用',row('window','退出 UU Link','断开连接并结束后台运行',`<button class="text action" data-window-command="exit">退出软件</button>`)):'')+section('UU Link',row('info','版本','',`<span class="uu-value">0.3.5</span>`)+row('devices','本机',esc(state.Hostname),`<span class="uu-value">${esc(state.Platform)}</span>`));
 }
-function layoutSignature(){return JSON.stringify([state.Roles,state.Service,state.Mappings,state.RulesError,state.ControllerRunning,state.Connection,state.Network]);}
+function layoutSignature(){return JSON.stringify([state.Roles,state.Service,state.Mappings,state.RulesError,state.ControllerRunning,state.Connection,state.Network,view==='devices'?state.DeviceConnections:null]);}
 function updateRealtime(){if(view!=='devices')return;document.querySelectorAll('[data-device-latency]').forEach(el=>{el.textContent=deviceLatency(el.dataset.deviceLatency);el.title=latencyTitle(el.dataset.deviceLatency);});document.querySelectorAll('[data-measure]').forEach(b=>{b.disabled=latencyPending.has(b.dataset.measure)||latencyRequests.has(b.dataset.measure);});}
 function render(){
  if(!state)return;
