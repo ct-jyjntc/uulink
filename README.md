@@ -4,9 +4,11 @@
 
 ## Windows x64 预览
 
-[安装版、便携版和校验文件](https://github.com/ct-jyjntc/uulink/releases/tag/v0.3.5-windows.1) · [构建与 Windows 实机验收清单](native-ui/windows/README.md)
+[安装版、便携版和校验文件](https://github.com/ct-jyjntc/uulink/releases/tag/v0.3.5-windows.2) · [构建与 Windows 实机验收清单](native-ui/windows/README.md)
 
 Windows 版沿用通用 TCP/UDP 映射、每条规则的局域网开关、设备列表和隧道延迟。它是控制端，适用于 Windows 10/11 x64。首次预览未签名，Windows 安装、短信登录、转发和退出清理等待实机验收。
+
+`v0.3.5-windows.2` 修正界面一致性：区块标题按钮右对齐、页面标题与卡片左缘统一、弹窗垂直居中；移除列表行的装饰性图标；补齐视图切换、弹窗开合与开关过渡动画。
 
 ## macOS
 
