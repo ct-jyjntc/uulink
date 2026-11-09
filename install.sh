@@ -80,8 +80,10 @@ assert_fresh() {
 }
 
 check_manager() {
-    local state unit
+    local state unit fresh=${1:-}
     # Match platform.go detection order; additionally require a live manager.
+    # fresh (fresh install) additionally demands that no uulink unit exists;
+    # upgrades require exactly the opposite, so they skip that assertion.
     if [[ -d /run/systemd/system ]]; then
         manager=systemd
     elif command -v openrc-run >/dev/null 2>&1 && command -v rc-service >/dev/null 2>&1; then
@@ -97,11 +99,13 @@ check_manager() {
         state=$(systemctl --version) || die '无法读取 systemd 构建信息。'
         [[ " $state " == *'+SECCOMP'* && -r /proc/sys/kernel/seccomp/actions_avail ]] ||
             die '无法确认 systemd/内核具备 seccomp 支持，拒绝在 IPv4 限制不明确时安装。'
-        for unit in uulink.service uulink-controller.service; do
-            state=$(systemctl show --property=LoadState --value "$unit") ||
-                die "无法确认 $unit 是否存在；已安全退出。"
-            [[ "$state" == not-found ]] || die "systemd 已知 $unit（$state），拒绝覆盖。"
-        done
+        if [[ "$fresh" == fresh ]]; then
+            for unit in uulink.service uulink-controller.service; do
+                state=$(systemctl show --property=LoadState --value "$unit") ||
+                    die "无法确认 $unit 是否存在；已安全退出。"
+                [[ "$state" == not-found ]] || die "systemd 已知 $unit（$state），拒绝覆盖。"
+            done
+        fi
     else
         for unit in openrc-run rc-service rc-update supervise-daemon; do need "$unit"; done
         [[ -d /run/openrc ]] || die '未发现运行中的 OpenRC（/run/openrc）。'
@@ -127,10 +131,9 @@ preflight() {
     [[ "$have_ca" -eq 1 ]] || die '缺少系统 CA 证书包；请先安装 ca-certificates。'
     [[ -d /run && ! -L /run && -w /run ]] || die '需要可写且非符号链接的 /run。'
     case "$mode" in
-    upgrade|upgrade_check) upgrade_preflight ;;
-    *) assert_fresh ;;
+    upgrade|upgrade_check) upgrade_preflight; check_manager ;;
+    *) assert_fresh; check_manager fresh ;;
     esac
-    check_manager
 }
 
 # Upgrade mode: verify this machine actually carries a previous fresh install,
@@ -341,7 +344,7 @@ main() {
         return 0
     fi
     assert_fresh
-    check_manager
+    check_manager fresh
     unset UU_CONFIG_FILE UU_ICE_POLICY UU_TRACE_FRAMES
     printf '%s\n' '即将安装纯转发/relay 被控端，配置服务 IPv4 限制后启动；请在终端输入本人手机号和短信验证码。' >&3
     install_started=1
