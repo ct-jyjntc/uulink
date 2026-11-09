@@ -57,6 +57,8 @@ func runCLI(args []string) error {
 	switch mode {
 	case "network-check":
 		return physicalNetworkCLI(args)
+	case "app-run":
+		return appOwnedCLI(args)
 	case "gui", "web":
 		return guiCLI(args)
 	case "client":
@@ -68,7 +70,12 @@ func runCLI(args []string) error {
 	case "controller-daemon":
 		return controllerDaemonCLI(args)
 	case "controller-worker":
+		if e := watchAppWorker(); e != nil {
+			return e
+		}
 		return controllerWorkerCLI(args)
+	case "udp-connect":
+		return gameUDPConnectCLI(args)
 	case "connect":
 		return connectCLI(args)
 	case "serve":
@@ -173,6 +180,23 @@ func command(name string, args ...string) error {
 	return c.Run()
 }
 func machineID() string {
+	// macOS: match the GUI's IOPlatformUUID so a config saved by the GUI is
+	// accepted by the CLI instead of failing the "belongs to another
+	// machine" check.
+	if runtime.GOOS == "darwin" {
+		b, err := exec.Command("/usr/sbin/ioreg", "-rd1", "-c", "IOPlatformExpertDevice").Output()
+		if err == nil {
+			for _, line := range strings.Split(string(b), "\n") {
+				if strings.Contains(line, "\"IOPlatformUUID\"") {
+					parts := strings.Split(line, "\"")
+					if len(parts) >= 4 {
+						return parts[3]
+					}
+				}
+			}
+		}
+		return ""
+	}
 	for _, path := range []string{"/etc/machine-id", "/var/lib/dbus/machine-id", "/etc/uulink/machine-id"} {
 		b, _ := os.ReadFile(path)
 		if id := strings.TrimSpace(string(b)); id != "" {

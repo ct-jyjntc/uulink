@@ -277,6 +277,10 @@ func (s *signalingSession) offer(o *signalOffer, sdp string) error {
 			acceptUDPMapping(transport, dc)
 			return
 		}
+		if dc.Label() == gameUDPLabel {
+			acceptGameUDP(transport, dc)
+			return
+		}
 		log.Printf("DataChannel %s", dc.Label())
 		dc.OnError(func(err error) { log.Printf("DataChannel ice=%s label=%s error=%v", id, dc.Label(), err) })
 		proto.register(dc)

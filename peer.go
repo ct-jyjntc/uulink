@@ -15,6 +15,7 @@ type rtcPeer struct {
 	mu            sync.Mutex
 	relays        []*pmRelay
 	udpMappings   atomic.Int32
+	gameUDP       *gameUDPBridge
 	closed        bool
 }
 
@@ -37,6 +38,8 @@ func (p *rtcPeer) close() {
 	p.closed = true
 	relays := p.relays
 	p.relays = nil
+	game := p.gameUDP
+	p.gameUDP = nil
 	p.mu.Unlock()
 	if p.networkCancel != nil {
 		p.networkCancel()
@@ -46,6 +49,9 @@ func (p *rtcPeer) close() {
 	}
 	for _, r := range relays {
 		r.close()
+	}
+	if game != nil {
+		game.close()
 	}
 	if p.pc != nil {
 		p.pc.Close()

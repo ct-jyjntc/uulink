@@ -61,6 +61,7 @@ type controllerClient struct {
 	iceServers  []webrtc.ICEServer
 	subPolicy   webrtc.ICETransportPolicy
 	aggregation int
+	gameUDP     *gameUDPBridge
 }
 
 func connectCLI(args []string) error {
@@ -297,6 +298,11 @@ func (c *controllerClient) controlReply(raw string) error {
 			}
 		}
 	})
+	if gameUDPListen != "" {
+		if err := startGameUDPClient(c); err != nil {
+			return err
+		}
+	}
 	dc, err := pc.CreateDataChannel("FILE_DATA_CHANNEL", nil)
 	if err != nil {
 		return err
@@ -499,6 +505,9 @@ func (c *controllerClient) close() {
 	}
 	if c.mappings != nil {
 		c.mappings.close()
+	}
+	if c.gameUDP != nil {
+		c.gameUDP.close()
 	}
 	if c.pc != nil {
 		c.pc.Close()
