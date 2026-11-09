@@ -7,8 +7,11 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 usage() {
     cat <<'HELP'
-UU 通用转发服务端安装（Linux amd64 / arm64，systemd，全新安装）
+UU 通用转发服务端安装/升级（Linux amd64 / arm64，systemd）
 用法: sudo bash install.sh [选项]
+  --upgrade           升级模式：仅替换引擎二进制并重启服务；身份/规则/配置/IPv4
+                      限制一律不动；升级前备份旧二进制，失败自动回滚。需已存在
+                      /usr/local/lib/uulink/uulink 与 uulink.service；未安装时拒绝。
   --repo OWNER/REPO    GitHub 发布仓库（默认 ct-jyjntc/uulink）
   --tag TAG            固定 Release tag（默认 v0.3.1；不使用 latest）
   --sha256 HEX        可选：从独立可信渠道获得的本架构二进制 SHA256
@@ -17,14 +20,17 @@ UU 通用转发服务端安装（Linux amd64 / arm64，systemd，全新安装）
   -h, --help          显示帮助，无网络/写入
 
 资产：uulink-server-linux-amd64 / uulink-server-linux-arm64；摘要：SHA256SUMS
-固定 CLI: install --components mapping --disable-power --skip-deps --yes --relay --no-start
+全新安装固定 CLI: install --components mapping --disable-power --skip-deps --yes --relay --no-start
 先安装不启动，再为 uulink.service 添加 IPv4 限制，最后启动。
 首次登录由 CLI 从 /dev/tty 交互读取本人手机号及短信验证码。
-已有身份、规则、服务或安装目录会被拒绝；不提供升级/覆盖/自动卸载。
+全新安装时已有身份、规则、服务或安装目录会被拒绝；不提供覆盖/自动卸载。
+升级（--upgrade）不触碰 /etc/uulink 与 /etc/uulink-controller 的任何内容，
+不重复登录，不重建 IPv4 drop-in；只校验、替换、重启。
 依赖须预装：bash curl sha256sum awk、系统 CA、带 seccomp 支持的 systemd。
 CLI 本身支持 OpenRC，但本脚本因无法等效强制进程 IPv4 而在其前置阶段拒绝。
 仅安装转发组件，禁用远程电源操作，不修改全局 IPv6/路由/防火墙。
-失败清理临时下载和自有锁，并尝试停止/禁用本次新服务；保留身份及安装文件。
+失败清理临时下载和自有锁；全新安装失败尝试停止/禁用本次新服务；
+升级失败用备份恢复原二进制。两种模式均保留身份及规则文件。
 HELP
 }
 
@@ -120,8 +126,59 @@ preflight() {
     done
     [[ "$have_ca" -eq 1 ]] || die '缺少系统 CA 证书包；请先安装 ca-certificates。'
     [[ -d /run && ! -L /run && -w /run ]] || die '需要可写且非符号链接的 /run。'
-    assert_fresh
+    case "$mode" in
+    upgrade|upgrade_check) upgrade_preflight ;;
+    *) assert_fresh ;;
+    esac
     check_manager
+}
+
+# Upgrade mode: verify this machine actually carries a previous fresh install,
+# then only ever touch the engine binary. Identity, rules, machine-id, the IPv4
+# drop-in and the unit file are never read for modification, let alone written.
+upgrade_preflight() {
+    [[ -f /usr/local/lib/uulink/uulink && -x /usr/local/lib/uulink/uulink && ! -L /usr/local/lib/uulink/uulink ]] ||
+        die '升级需要已存在的常规文件 /usr/local/lib/uulink/uulink（全新安装请去掉 --upgrade）。'
+    local state
+    state=$(systemctl show --property=LoadState --value uulink.service) ||
+        die '无法确认 uulink.service 状态。'
+    [[ "$state" == loaded ]] || die "uulink.service 未安装（$state）；升级仅适用于已安装的服务端。"
+    [[ -f /etc/systemd/system/uulink.service.d/90-ipv4-only.conf ]] ||
+        printf '警告：未发现 IPv4 drop-in；继续升级但不重建它。\n' >&2
+    if [[ ! -f /etc/uulink/config.json ]]; then
+        die '未发现 /etc/uulink/config.json；本机尚未登录，请先全新安装并登录。'
+    fi
+}
+
+# Stop service, swap the binary, restart, verify. Any failure restores the
+# backup and restarts the old binary so the tunnel keeps running.
+do_upgrade() {
+    local engine=/usr/local/lib/uulink/uulink backup active
+    printf '%s\n' '升级不修改：/etc/uulink（身份）、/etc/uulink-controller（规则）、machine-id、IPv4 限制、unit 文件。'
+    active=$(systemctl is-active --quiet uulink.service && echo yes || echo no)
+    backup="$engine.upgrade-$(date -u +%Y%m%dT%H%M%SZ)"
+    cp -p -- "$engine" "$backup" || die '备份旧二进制失败；未做任何更改。'
+    install -m 0755 -- "$workdir/engine" "$engine" || {
+        printf '错误：替换二进制失败；恢复备份。\n' >&2
+        mv -f -- "$backup" "$engine" || printf '警告：恢复备份失败，请人工检查 %s。\n' "$backup" >&2
+        die '升级中止。'
+    }
+    if ! systemctl restart uulink.service; then
+        printf '错误：新二进制启动失败；回滚。\n' >&2
+        mv -f -- "$backup" "$engine" || die "回滚失败：旧二进制无法恢复，备份在 $backup。"
+        systemctl restart uulink.service || die '回滚后重启失败；请人工检查服务。'
+        die '已回滚到旧版本。'
+    fi
+    if ! systemctl is-active --quiet uulink.service; then
+        printf '错误：服务未能进入 active；回滚。\n' >&2
+        mv -f -- "$backup" "$engine" || die "回滚失败：旧二进制无法恢复，备份在 $backup。"
+        systemctl restart uulink.service || die '回滚后重启失败；请人工检查服务。'
+        die '已回滚到旧版本。'
+    fi
+    printf '升级完成：%s\n' "$("$engine" version 2>/dev/null || echo 未知版本)"
+    printf '旧二进制备份：%s（确认稳定后可删除）\n' "$backup"
+    [[ "$active" == yes ]] || printf '注意：升级前服务本就未运行，现已按 unit 定义启动。\n'
+    printf '%s\n' '查看：sudo uulink status；sudo uulink logs'
 }
 
 # Extract exactly one conventional sha256sum entry for the requested asset.
@@ -189,7 +246,7 @@ cleanup() {
 main() {
     local repo=ct-jyjntc/uulink tag=v0.3.1 pinned_sha=''
     local mode=install arch asset sums base digest actual cmd
-    local manager=''
+    local manager='' upgrade=0
     # EXIT runs after main returns; these cleanup variables must outlive its locals.
     workdir='' lock_owned=0 install_started=0
     lockdir=/run/uulink-server-install.lock
@@ -205,29 +262,57 @@ main() {
                     --sha256) pinned_sha=$2 ;;
                 esac
                 shift 2 ;;
+            --upgrade)
+                [[ "$upgrade" == 0 ]] || die '--upgrade 不能重复。'
+                upgrade=1; shift ;;
             --plan|--check)
                 [[ "$mode" == install ]] || die '--plan 与 --check 不能组合或重复。'
                 mode=${1#--}; shift ;;
             *) die "未知参数：$1（见 --help）。" ;;
         esac
     done
+    if [[ "$upgrade" == 1 ]]; then
+        if [[ "$mode" == check ]]; then
+            # --check inspects the local machine; for upgrades it also verifies
+            # the previous install, so it stays allowed and runs upgrade checks.
+            mode=upgrade_check
+        elif [[ "$mode" == plan ]]; then
+            mode=upgrade_plan
+        else
+            mode=upgrade
+        fi
+    fi
     validate_release
     select_arch
     asset="uulink-server-linux-$arch"
     sums=SHA256SUMS
     base="https://github.com/$repo/releases/download/$tag"
-    printf '二进制：%s/%s\n校验表：%s/%s\nCLI：' "$base" "$asset" "$base" "$sums"
-    printf ' %s' "${cli_args[@]}"
-    printf '\n'
-    printf '%s\n' '后续：新建 uulink.service.d/90-ipv4-only.conf（AF_UNIX AF_INET AF_NETLINK）→ daemon-reload → 读回限制 → start。'
-    [[ "$mode" != plan ]] || return 0
+    case "$mode" in
+    upgrade|upgrade_plan|upgrade_check)
+        printf '升级二进制：%s/%s\n校验表：%s/%s\n' "$base" "$asset" "$base" "$sums"
+        printf '%s\n' '后续：校验 → 备份旧二进制 → 替换 → 重启 uulink.service → 健康检查。身份/规则/IPv4 限制保持不变。'
+        ;;
+    *)
+        printf '二进制：%s/%s\n校验表：%s/%s\nCLI：' "$base" "$asset" "$base" "$sums"
+        printf ' %s' "${cli_args[@]}"
+        printf '\n'
+        printf '%s\n' '后续：新建 uulink.service.d/90-ipv4-only.conf（AF_UNIX AF_INET AF_NETLINK）→ daemon-reload → 读回限制 → start。'
+        ;;
+    esac
+    [[ "$mode" != plan && "$mode" != upgrade_plan ]] || return 0
     preflight
     printf '本地前置检查完成：%s / %s（不证明协议兼容或登录可用）。\n' "$arch" "$manager"
-    [[ "$mode" != check ]] || return 0
-    # Use a controlling terminal even if stdin is a pipe, redirected or /dev/null.
-    { exec 3<>/dev/tty; } 2>/dev/null || die '需要交互终端 /dev/tty；SSH 请分配 PTY，禁止无人值守短信登录。'
-    [[ -t 3 ]] || die '/dev/tty 不是终端。'
-    umask 077
+    [[ "$mode" != check && "$mode" != upgrade_check ]] || return 0
+    # Fresh install needs an interactive login; upgrade never logs in and may
+    # run unattended (cron/CI) without a terminal.
+    if [[ "$mode" == upgrade ]]; then
+        umask 077
+    else
+        # Use a controlling terminal even if stdin is a pipe, redirected or /dev/null.
+        { exec 3<>/dev/tty; } 2>/dev/null || die '需要交互终端 /dev/tty；SSH 请分配 PTY，禁止无人值守短信登录。'
+        [[ -t 3 ]] || die '/dev/tty 不是终端。'
+        umask 077
+    fi
     # Atomic lock only serializes instances of this wrapper. No force/unlock mode.
     mkdir -- "$lockdir" || die "无法取得锁 $lockdir；请确认无其他安装，不自动删除他人的锁。"
     lock_owned=1
@@ -251,6 +336,10 @@ main() {
     chmod 0700 "$workdir/engine"
     # version has no install side effects; it is NOT a protocol compatibility check.
     "$workdir/engine" version || die '引擎无法运行；请核对静态 Linux 构建、CPU 与 /tmp 的 noexec 限制。'
+    if [[ "$mode" == upgrade ]]; then
+        do_upgrade
+        return 0
+    fi
     assert_fresh
     check_manager
     unset UU_CONFIG_FILE UU_ICE_POLICY UU_TRACE_FRAMES
