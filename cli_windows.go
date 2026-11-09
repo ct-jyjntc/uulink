@@ -13,7 +13,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const version = "0.3.6-tunopt"
+const version = "0.3.6"
 const configDefault = ""
 const clientStateDir = ""
 

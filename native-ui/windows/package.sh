@@ -9,7 +9,7 @@ scratch=$(mktemp -d "${TMPDIR:-/tmp}/uulink-windows.XXXXXX")
 trap 'rm -rf -- "$scratch"' EXIT
 stage="$scratch/stage"
 src="$scratch/src"
-dist=UU-Link-0.3.5-windows-x64
+dist=UU-Link-0.3.6-windows-x64
 mkdir -p -- "$stage" "$src"
 cp -- "$root"/*.go "$root/go.mod" "$root/go.sum" "$src/"
 cp -R -- "$root/gui_assets" "$src/"
@@ -22,12 +22,15 @@ cp -- "$root/native-ui/windows/AppIcon.ico" "$scratch/AppIcon.ico"
 (
   cd -- "$src"
   go run github.com/tc-hib/go-winres@v0.3.3 simply --arch amd64 --out "$src/rsrc" \
-    --icon "$scratch/AppIcon.ico" --manifest gui --product-version 0.3.5.1 --file-version 0.3.5.1 \
+    --icon "$scratch/AppIcon.ico" --manifest gui --product-version 0.3.6.1 --file-version 0.3.6.1 \
     --product-name "UU Link" --file-description "UU Link" --original-filename "UU Link.exe"
   CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags='-s -w -H=windowsgui' -o "$stage/UU Link.exe" .
 )
 (
-  cd -- "$root/experiments/udp-game-adaptive"
+  # The engine is built from the same main-tree sources as the GUI: it now
+  # carries the tunnel optimizations, TCP aggregation and the game UDP
+  # transport, so releases no longer depend on the experiments snapshot.
+  cd -- "$src"
   CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags='-s -w' -o "$stage/uulink-engine.exe" .
 )
 cp -- "$root/THIRD_PARTY_NOTICES.txt" "$stage/"
@@ -45,7 +48,7 @@ cp -- "$bootstrapper" "$src/assets/webview2-setup.exe"
 (
   cd -- "$src"
   go run github.com/tc-hib/go-winres@v0.3.3 simply --arch amd64 --out "$src/rsrc" \
-    --icon "$scratch/AppIcon.ico" --manifest gui --product-version 0.3.5.1 --file-version 0.3.5.1 \
+    --icon "$scratch/AppIcon.ico" --manifest gui --product-version 0.3.6.1 --file-version 0.3.6.1 \
     --product-name "UU Link" --file-description "UU Link Setup" --original-filename "UU Link Setup.exe"
   CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -tags uulink_setup -trimpath -buildvcs=false -ldflags='-s -w -H=windowsgui' -o "$scratch/$dist-setup.exe" .
 )

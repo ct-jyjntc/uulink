@@ -14,10 +14,10 @@ SilentInstall silent
 SetFont "Microsoft YaHei UI" 9
 Icon "${APP_ICON}"
 UninstallIcon "${APP_ICON}"
-VIProductVersion "0.3.5.1"
+VIProductVersion "0.3.6.1"
 VIAddVersionKey "ProductName" "UU Link"
 VIAddVersionKey "FileDescription" "UU Link installation backend"
-VIAddVersionKey "FileVersion" "0.3.5.1"
+VIAddVersionKey "FileVersion" "0.3.6.1"
 VIAddVersionKey "LegalCopyright" "UU Link contributors"
 SetCompressor /SOLID lzma
 UninstPage uninstConfirm
@@ -110,7 +110,7 @@ Section "UU Link"
   ClearErrors
   CreateShortCut "$SMPROGRAMS\UU Link.lnk" "$INSTDIR\UU Link.exe"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "UU Link"
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "0.3.5"
+  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "0.3.6"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\UU Link.exe"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
