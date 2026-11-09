@@ -24,7 +24,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const version = "0.5.0-dev"
+const version = "0.3.6"
 const configDefault = "/etc/uulink/config.json"
 const installedBinary = "/usr/local/lib/uulink/uulink"
 const unitPath = "/etc/systemd/system/uulink.service"
