@@ -223,8 +223,8 @@ func startUDPMapping(ctx context.Context, pc *webrtc.PeerConnection, r forwardRu
 	if e != nil {
 		return nil, e
 	}
-	_ = local.SetReadBuffer(256 * 1024)
-	_ = local.SetWriteBuffer(256 * 1024)
+	_ = local.SetReadBuffer(4 << 20)
+	_ = local.SetWriteBuffer(4 << 20)
 	ordered, retries := false, uint16(0)
 	dc, e := pc.CreateDataChannel(udpMappingPrefix+base64.RawURLEncoding.EncodeToString([]byte(r.Target)), &webrtc.DataChannelInit{Ordered: &ordered, MaxRetransmits: &retries})
 	if e != nil {
@@ -319,8 +319,8 @@ func (b *udpForward) serverMessage(raw []byte) {
 			b.mu.Unlock()
 			return
 		}
-		_ = conn.SetReadBuffer(256 * 1024)
-		_ = conn.SetWriteBuffer(256 * 1024)
+		_ = conn.SetReadBuffer(4 << 20)
+		_ = conn.SetWriteBuffer(4 << 20)
 		f = &udpMappingFlow{conn: conn}
 		b.flows[id] = f
 		go b.readServer(id, f)

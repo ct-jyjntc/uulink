@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -142,12 +143,61 @@ func encodePM(f pmFrame) []byte {
 }
 
 type pmSender interface{ Send([]byte) error }
+
+// bufferedSender is implemented by webrtc.DataChannel. Waiting for buffer
+// space via OnBufferedAmountLow avoids the fixed 5 ms polling delay per frame.
+type bufferedSender interface {
+	pmSender
+	BufferedAmount() uint64
+	SetBufferedAmountLowThreshold(uint64)
+	OnBufferedAmountLow(func())
+}
+
+// bufferGate multiplexes "the DataChannel buffer drained" notifications for
+// every stream sharing one channel. The callback is installed exactly once.
+type bufferGate struct {
+	once  sync.Once
+	ready chan struct{}
+}
+
+func (g *bufferGate) wait(ctx context.Context, s bufferedSender, threshold uint64, deadline time.Time) error {
+	g.once.Do(func() {
+		g.ready = make(chan struct{}, 1)
+		s.SetBufferedAmountLowThreshold(threshold)
+		s.OnBufferedAmountLow(func() {
+			select {
+			case g.ready <- struct{}{}:
+			default:
+			}
+		})
+	})
+	for {
+		if s.BufferedAmount() <= threshold {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("data channel backpressure timeout")
+		}
+		timer := time.NewTimer(2 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-g.ready:
+			timer.Stop()
+		case <-timer.C:
+			// Safety net in case a notification raced with another waiter.
+		}
+	}
+}
+
 type pmRelay struct {
 	mu      sync.Mutex
 	streams map[pmKey]*pmStream
 	sender  pmSender
 	seq     atomic.Uint64
 	closed  bool
+	gate    bufferGate
 }
 type pmStream struct {
 	key  pmKey
@@ -160,16 +210,15 @@ func newPMRelay(s pmSender) *pmRelay { return &pmRelay{streams: make(map[pmKey]*
 func (r *pmRelay) send(key pmKey, kind uint64, p []byte) error {
 	f := pmFrame{key: key, seq: r.seq.Add(1), ts: uint64(time.Now().Unix()), kind: kind, payload: p}
 	if kind == pmDATA {
-		if dc, ok := r.sender.(interface{ BufferedAmount() uint64 }); ok {
-			deadline := time.Now().Add(30 * time.Second)
-			for dc.BufferedAmount() > 1<<20 {
-				r.mu.Lock()
-				closed := r.closed
-				r.mu.Unlock()
-				if closed || time.Now().After(deadline) {
-					return fmt.Errorf("data channel backpressure timeout")
-				}
-				time.Sleep(5 * time.Millisecond)
+		if dc, ok := r.sender.(bufferedSender); ok {
+			r.mu.Lock()
+			closed := r.closed
+			r.mu.Unlock()
+			if closed {
+				return fmt.Errorf("relay closed")
+			}
+			if e := r.gate.wait(context.Background(), dc, 256*1024, time.Now().Add(30*time.Second)); e != nil {
+				return e
 			}
 		}
 	}
@@ -259,11 +308,9 @@ func (r *pmRelay) handle(raw []byte) {
 			r.closeStream(s, true)
 			return
 		}
-		if r.send(f.key, pmDATAACK, nil) != nil {
-			r.closeStream(s, false)
-		}
 	case pmDATAACK:
-		// The official controller does not require B-to-A acknowledgements.
+		// The reliable SCTP channel already acknowledges every frame; the
+		// extra per-frame DATAACK doubled reverse traffic and CPU cost.
 
 	default:
 		log.Printf("PM unsupported type=%d", f.kind)
@@ -305,7 +352,9 @@ func (r *pmRelay) open(s *pmStream, payload []byte) {
 	}
 	log.Printf("PM connected rule=%d stream=%d target=%s", s.key.rule, s.key.stream, c.RemoteAddr())
 	defer r.closeStream(s, true)
-	buf := make([]byte, 16*1024)
+	// 60 KiB reads fill one SCTP message (max 64 KiB) minus the pm frame
+	// envelope, cutting per-byte overhead roughly 4x versus 16 KiB reads.
+	buf := make([]byte, 60*1024)
 	for {
 		n, err := c.Read(buf)
 		if n > 0 {

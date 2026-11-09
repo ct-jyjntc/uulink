@@ -52,6 +52,15 @@ type controllerClient struct {
 	rules                   func() ([]forwardRule, error)
 	report                  func(map[string]string)
 	latency                 func(time.Duration)
+
+	// Parallel aggregation associations for TCP mappings. aggregation is
+	// the user-configured total association count (1 disables aggregation).
+	mu          sync.Mutex
+	subs        map[string]*subPeer
+	subRing     uint32
+	iceServers  []webrtc.ICEServer
+	subPolicy   webrtc.ICETransportPolicy
+	aggregation int
 }
 
 func connectCLI(args []string) error {
@@ -133,7 +142,7 @@ func runControllerRules(ctx context.Context, device string, relay bool, rules fu
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	s := &signalingSession{ctx: ctx, cancel: cancel, started: time.Now()}
-	c := &controllerClient{s: s, rules: rules, report: report, relayOnly: relay, appID: strings.ReplaceAll(uuid.NewString(), "-", ""), iceID: strings.ReplaceAll(uuid.NewString(), "-", "")}
+	c := &controllerClient{s: s, rules: rules, report: report, relayOnly: relay, appID: strings.ReplaceAll(uuid.NewString(), "-", ""), iceID: strings.ReplaceAll(uuid.NewString(), "-", ""), aggregation: aggregationSetting()}
 	if len(latency) > 0 {
 		c.latency = latency[0]
 	}
@@ -147,6 +156,26 @@ func runControllerRules(ctx context.Context, device string, relay bool, rules fu
 	defer timer.Stop()
 	defer s.close()
 	return s.run(room, time.Minute, 2*time.Second)
+}
+
+// aggregationSetting reads the user's TCP aggregation preference. 0 (unset)
+// keeps the legacy single association; values are clamped to 1-16. Aggregated
+// associations carry TCP only — UDP rules (game traffic) always stay on their
+// dedicated channels and are never touched by this setting.
+func aggregationSetting() int {
+	v := 4
+	if s := os.Getenv("UU_TCP_AGGREGATION"); s != "" {
+		if n, e := strconv.Atoi(s); e == nil {
+			v = n
+		}
+	}
+	if v < 1 {
+		v = 1
+	}
+	if v > 16 {
+		v = 16
+	}
+	return v
 }
 
 func signalAck(raw string) (string, json.RawMessage, error) {
@@ -236,6 +265,11 @@ func (c *controllerClient) controlReply(raw string) error {
 	if c.relayOnly || r.ForceRelay {
 		policy = webrtc.ICETransportPolicyRelay
 	}
+	c.mu.Lock()
+	c.iceServers = buildICEServers(r.IceServers)
+	c.subPolicy = policy
+	c.subs = map[string]*subPeer{}
+	c.mu.Unlock()
 	pc, networkCancel, err := newProviderPeerConnection(c.s.ctx, webrtc.Configuration{ICEServers: buildICEServers(r.IceServers), ICETransportPolicy: policy})
 	if err != nil {
 		return err
@@ -270,6 +304,7 @@ func (c *controllerClient) controlReply(raw string) error {
 	c.mappings = newControllerMappings(c.s.ctx, dc)
 	c.mappings.onLatency = c.latency
 	c.mappings.udpFactory = func(r forwardRule) (*udpForward, error) { return startUDPMapping(c.s.ctx, pc, r) }
+	c.mappings.shunt = c.pickSub
 	dc.OnMessage(func(m webrtc.DataChannelMessage) { c.mappings.handle(m.Data) })
 	dc.OnOpen(func() {
 		c.ready.Store(true)
@@ -298,12 +333,53 @@ func (c *controllerClient) soac(data map[string]any) error {
 	}
 	return c.s.text(`42["soac",` + string(b) + `]`)
 }
+
+// soacTo sends a soac message naming an explicit ice_id (used by the extra
+// parallel associations created for TCP aggregation).
+func (c *controllerClient) soacTo(iceID string, data map[string]any) error {
+	data["app_control_id"] = c.appID
+	data["ice_id"] = iceID
+	b, err := json.Marshal(map[string]any{"client_id": c.publisher, "data": data})
+	if err != nil {
+		return err
+	}
+	return c.s.text(`42["soac",` + string(b) + `]`)
+}
+
+// subPeer is one parallel WebRTC association dedicated to TCP aggregation.
+// Each has an independent SCTP congestion window, so N subPeers multiply the
+// achievable throughput of multi-connection downloads over a high-RTT relay.
+type subPeer struct {
+	iceID      string
+	pc         *webrtc.PeerConnection
+	forwarder  *pmForwarder
+	candidates []webrtc.ICECandidateInit
+	pending    bool // awaiting the gzip attachment carrying this peer's answer
+	ready      bool
+}
+
 func (c *controllerClient) event(event string, raw json.RawMessage) error {
 	switch event {
 	case "soac":
 		var o signalOffer
 		if e := json.Unmarshal(raw, &o); e != nil {
 			return e
+		}
+		if sp := c.findSub(o.Data.IceID); sp != nil {
+			switch o.Data.Type {
+			case "answer":
+				if o.Data.SDP != "" {
+					return c.subAnswer(sp, o.Data.SDP)
+				}
+				sp.pending = true
+			case "candidate":
+				if sp.pc.RemoteDescription() == nil {
+					sp.candidates = append(sp.candidates, o.Data.Candidate)
+				} else if e := sp.pc.AddICECandidate(o.Data.Candidate); e != nil {
+					log.Printf("sub candidate: %v", e)
+				}
+			}
+			return nil
 		}
 		if o.Data.IceID != c.iceID {
 			return nil
@@ -332,6 +408,11 @@ func (c *controllerClient) event(event string, raw json.RawMessage) error {
 		if err := json.Unmarshal(raw, &leaving); err != nil {
 			return err
 		}
+		if sp := c.findSub(leaving.IceID); sp != nil {
+			log.Printf("aggregation peer %s released; dropping it", leaving.IceID)
+			c.dropSub(sp)
+			return nil
+		}
 		if leaving.IceID != "" && leaving.IceID != c.iceID {
 			return nil
 		}
@@ -343,10 +424,45 @@ func (c *controllerClient) event(event string, raw json.RawMessage) error {
 	return nil
 }
 func (c *controllerClient) binary(b []byte) error {
-	if !c.pending {
+	// The gzip answer attachment arrives right after the soac "answer" event
+	// that set pending on its association; route it to whichever one is owed.
+	var target *subPeer
+	c.mu.Lock()
+	for _, sp := range c.subs {
+		if sp.pending {
+			target = sp
+			break
+		}
+	}
+	c.mu.Unlock()
+	if target == nil {
+		if !c.pending {
+			return nil
+		}
+		c.pending = false
+		if len(b) > 0 && b[0] == 4 {
+			b = b[1:]
+		}
+		z, e := gzip.NewReader(bytes.NewReader(b))
+		if e != nil {
+			return e
+		}
+		defer z.Close()
+		sdp, e := io.ReadAll(io.LimitReader(z, (2<<20)+1))
+		if e != nil {
+			return e
+		}
+		if len(sdp) > 2<<20 {
+			return fmt.Errorf("SDP too large")
+		}
+		if e := c.answer(string(sdp)); e != nil {
+			return e
+		}
+		// The main association is up: bring up the aggregation peers.
+		c.startSubs()
 		return nil
 	}
-	c.pending = false
+	target.pending = false
 	if len(b) > 0 && b[0] == 4 {
 		b = b[1:]
 	}
@@ -362,7 +478,7 @@ func (c *controllerClient) binary(b []byte) error {
 	if len(sdp) > 2<<20 {
 		return fmt.Errorf("SDP too large")
 	}
-	return c.answer(string(sdp))
+	return c.subAnswer(target, string(sdp))
 }
 func (c *controllerClient) answer(sdp string) error {
 	if e := c.pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: sdp}); e != nil {
@@ -387,6 +503,148 @@ func (c *controllerClient) close() {
 	if c.pc != nil {
 		c.pc.Close()
 	}
+	c.mu.Lock()
+	subs := c.subs
+	c.subs = map[string]*subPeer{}
+	c.mu.Unlock()
+	for _, sp := range subs {
+		c.closeSub(sp)
+	}
+}
+
+// startSubs creates the extra parallel associations once the main one is up.
+func (c *controllerClient) startSubs() {
+	factor := c.aggregation
+	if factor <= 1 {
+		return
+	}
+	c.mu.Lock()
+	if c.subs == nil {
+		c.subs = map[string]*subPeer{}
+	}
+	existing := len(c.subs)
+	iceServers, policy := c.iceServers, c.subPolicy
+	publisher := c.publisher
+	c.mu.Unlock()
+	if existing >= factor-1 {
+		return
+	}
+	for i := existing + 1; i < factor; i++ {
+		if e := c.startSub(fmt.Sprintf("%s-aggr%d", c.iceID, i), iceServers, policy, publisher); e != nil {
+			log.Printf("aggregation peer %d failed: %v", i, e)
+			return
+		}
+	}
+	log.Printf("TCP aggregation: %d parallel associations requested", factor)
+}
+
+func (c *controllerClient) startSub(iceID string, iceServers []webrtc.ICEServer, policy webrtc.ICETransportPolicy, publisher string) error {
+	pc, networkCancel, err := newProviderPeerConnection(c.s.ctx, webrtc.Configuration{ICEServers: iceServers, ICETransportPolicy: policy})
+	if err != nil {
+		return err
+	}
+	sp := &subPeer{iceID: iceID, pc: pc}
+	pc.OnConnectionStateChange(func(st webrtc.PeerConnectionState) {
+		log.Printf("aggregation peer %s state=%s", iceID, st)
+		if st == webrtc.PeerConnectionStateFailed {
+			c.dropSub(sp)
+		}
+	})
+	pc.OnICECandidate(func(v *webrtc.ICECandidate) {
+		if v != nil {
+			if e := c.soacTo(iceID, map[string]any{"type": "candidate", "candidate": v.ToJSON()}); e != nil {
+				log.Printf("aggregation candidate: %v", e)
+			}
+		}
+	})
+	dc, err := pc.CreateDataChannel("FILE_DATA_CHANNEL", nil)
+	if err != nil {
+		networkCancel()
+		pc.Close()
+		return err
+	}
+	sp.forwarder = newPMForwarder(c.s.ctx, dc, "")
+	sp.forwarder.session = 0 // set on first serveConn via registerSubSession
+	dc.OnMessage(func(m webrtc.DataChannelMessage) { sp.forwarder.handle(m.Data) })
+	dc.OnOpen(func() {
+		sp.ready = true
+		log.Printf("aggregation peer %s data channel open", iceID)
+	})
+	dc.OnClose(func() { c.dropSub(sp) })
+	dc.OnError(func(e error) { log.Printf("aggregation peer %s channel: %v", iceID, e) })
+	o, err := pc.CreateOffer(nil)
+	if err != nil {
+		networkCancel()
+		pc.Close()
+		return err
+	}
+	if err = pc.SetLocalDescription(o); err != nil {
+		networkCancel()
+		pc.Close()
+		return err
+	}
+	c.mu.Lock()
+	c.subs[iceID] = sp
+	c.mu.Unlock()
+	return c.soacTo(iceID, map[string]any{"type": "offer", "sdp": o.SDP})
+}
+
+func (c *controllerClient) findSub(iceID string) *subPeer {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.subs[iceID]
+}
+
+func (c *controllerClient) dropSub(sp *subPeer) {
+	c.mu.Lock()
+	if cur := c.subs[sp.iceID]; cur != sp {
+		c.mu.Unlock()
+		return
+	}
+	delete(c.subs, sp.iceID)
+	c.mu.Unlock()
+	c.closeSub(sp)
+}
+
+func (c *controllerClient) closeSub(sp *subPeer) {
+	if sp.forwarder != nil {
+		sp.forwarder.close()
+	}
+	sp.pc.Close()
+}
+
+func (c *controllerClient) subAnswer(sp *subPeer, sdp string) error {
+	if e := sp.pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: sdp}); e != nil {
+		return e
+	}
+	for _, v := range sp.candidates {
+		if e := sp.pc.AddICECandidate(v); e != nil {
+			return e
+		}
+	}
+	sp.candidates = nil
+	log.Printf("aggregation peer %s answer accepted", sp.iceID)
+	return nil
+}
+
+// pickSub returns the aggregation peer with the fewest live TCP streams, or
+// nil when only the main association is available.
+func (c *controllerClient) pickSub() *pmForwarder {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var best *subPeer
+	for _, sp := range c.subs {
+		if !sp.ready || sp.forwarder == nil {
+			continue
+		}
+		if best == nil || sp.forwarder.streamCount() < best.forwarder.streamCount() {
+			best = sp
+		}
+	}
+	if best == nil {
+		return nil
+	}
+	return best.forwarder
 }
 
 type forwardStream struct {
@@ -405,9 +663,19 @@ type pmForwarder struct {
 	listener    net.Listener
 	closed      bool
 	allowSource func(net.Addr) bool
-	seq         atomic.Uint64
-	streamID    atomic.Uint64
-	session     uint64
+	// shunt, when set, hands newly accepted TCP connections to a parallel
+	// aggregation association instead of this one.
+	shunt      func() *pmForwarder
+	seq        atomic.Uint64
+	streamID   atomic.Uint64
+	session    uint64
+	gate       bufferGate
+}
+
+func (r *pmForwarder) streamCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.streams)
 }
 
 var forwardSessionID atomic.Uint64
@@ -417,17 +685,9 @@ func newPMForwarder(ctx context.Context, sender pmSender, target string) *pmForw
 	return &pmForwarder{ctx: ctx, cancel: cancel, sender: sender, target: target, streams: map[pmKey]*forwardStream{}, session: forwardSessionID.Add(1)}
 }
 func (r *pmForwarder) send(k pmKey, kind uint64, b []byte) error {
-	if dc, ok := r.sender.(interface{ BufferedAmount() uint64 }); ok && kind == pmDATA {
-		deadline := time.Now().Add(30 * time.Second)
-		for dc.BufferedAmount() > 1<<20 {
-			if time.Now().After(deadline) {
-				return fmt.Errorf("mapping send timeout")
-			}
-			select {
-			case <-r.ctx.Done():
-				return r.ctx.Err()
-			case <-time.After(5 * time.Millisecond):
-			}
+	if dc, ok := r.sender.(bufferedSender); ok && kind == pmDATA {
+		if e := r.gate.wait(r.ctx, dc, 256*1024, time.Now().Add(30*time.Second)); e != nil {
+			return e
 		}
 	}
 	return r.sender.Send(encodePM(pmFrame{key: k, seq: r.seq.Add(1), ts: uint64(time.Now().Unix()), kind: kind, payload: b}))
@@ -473,6 +733,15 @@ func (r *pmForwarder) accept() error {
 			conn.Close()
 			continue
 		}
+		// Round-robin each new TCP connection across the parallel
+		// aggregation associations so their independent congestion windows
+		// add up for multi-connection downloads.
+		if r.shunt != nil {
+			if sub := r.shunt(); sub != nil && sub != r {
+				go sub.serveConnTo(conn, r.target)
+				continue
+			}
+		}
 		go r.serveConn(conn)
 	}
 }
@@ -489,6 +758,9 @@ func (r *pmForwarder) drop(k pmKey, s *forwardStream, notify bool) {
 	})
 }
 func (r *pmForwarder) serveConn(conn net.Conn) {
+	r.serveConnTo(conn, r.target)
+}
+func (r *pmForwarder) serveConnTo(conn net.Conn, target string) {
 	k := pmKey{session: r.session, rule: 1, stream: r.streamID.Add(1)}
 	s := &forwardStream{conn: conn, frames: make(chan pmFrame, 64), done: make(chan struct{})}
 	r.mu.Lock()
@@ -500,7 +772,7 @@ func (r *pmForwarder) serveConn(conn net.Conn) {
 	r.streams[k] = s
 	r.mu.Unlock()
 	defer r.drop(k, s, true)
-	h, p, _ := net.SplitHostPort(r.target)
+	h, p, _ := net.SplitHostPort(target)
 	port, _ := strconv.Atoi(p)
 	b, _ := json.Marshal(map[string]any{"version": 1, "target_host": h, "target_port": port})
 	if e := r.send(k, pmSYN, b); e != nil {
@@ -524,7 +796,7 @@ func (r *pmForwarder) serveConn(conn net.Conn) {
 	}
 	go func() {
 		defer r.drop(k, s, true)
-		buf := make([]byte, 16*1024)
+		buf := make([]byte, 60*1024)
 		for {
 			n, e := conn.Read(buf)
 			if n > 0 {
@@ -552,9 +824,8 @@ func (r *pmForwarder) serveConn(conn net.Conn) {
 				if _, e := io.Copy(conn, bytes.NewReader(f.payload)); e != nil {
 					return
 				}
-				if r.send(k, pmDATAACK, nil) != nil {
-					return
-				}
+				// No per-frame DATAACK: the reliable SCTP channel already
+				// acknowledges data end to end.
 			}
 		}
 	}

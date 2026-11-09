@@ -410,9 +410,15 @@ func (g *guiServer) handle(w http.ResponseWriter, r *http.Request) {
 		}
 	case r.URL.Path == "/api/preferences" && r.Method == "POST":
 		var b struct {
-			Enabled bool `json:"enabled"`
+			Enabled     bool `json:"enabled"`
+			Aggregation *int `json:"aggregation,omitempty"`
 		}
 		err = guiBody(w, r, &b)
+		if err == nil && b.Aggregation != nil {
+			err = g.setAggregation(*b.Aggregation)
+			data = map[string]bool{"ok": true}
+			break
+		}
 		if err == nil {
 			err = g.setConnectOnOpen(b.Enabled)
 			data = map[string]bool{"ok": true}

@@ -35,6 +35,10 @@ func newProviderPeerConnection(parent context.Context, config webrtc.Configurati
 	}
 	ctx, cancel := context.WithCancel(parent)
 	settings := webrtc.SettingEngine{}
+	// High-RTT relay paths (~250 ms) spend most of a transfer climbing the
+	// slow-start ramp. Raise both the receive buffer and the cwnd floor.
+	settings.SetSCTPMaxReceiveBufferSize(4 << 20)
+	settings.SetSCTPMinCwnd(2 << 20)
 	settings.SetNet(&physicalPionNet{Net: base, e: e, ctx: ctx})
 	// Pion active ICE-TCP uses a stdlib dialer outside transport.Net. TURN/TCP
 	// still uses our bound DialTCP; disable only the unbound active candidate path.
@@ -100,7 +104,17 @@ func (n *physicalPionNet) listenPacket(ctx context.Context, network, address str
 		lc = *base
 	}
 	lc.Control = n.e.control(lc.Control)
-	return lc.ListenPacket(ctx, network, address)
+	c, err := lc.ListenPacket(ctx, network, address)
+	if err != nil {
+		return nil, err
+	}
+	// Every ICE/DTLS socket absorbs bursts for the whole SCTP association;
+	// the OS default (208 KiB on Linux) throttles high-BDP relay paths.
+	if u, ok := c.(*net.UDPConn); ok {
+		_ = u.SetReadBuffer(8 << 20)
+		_ = u.SetWriteBuffer(8 << 20)
+	}
+	return c, nil
 }
 func (n *physicalPionNet) ListenPacket(network, address string) (net.PacketConn, error) {
 	return n.listenPacket(n.ctx, network, address, nil)

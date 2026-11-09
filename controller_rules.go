@@ -194,6 +194,9 @@ type controllerMappings struct {
 	closed       bool
 	udpFactory   func(forwardRule) (*udpForward, error)
 	onLatency    func(time.Duration)
+	// shunt hands accepted TCP connections to a parallel aggregation
+	// association when one is available.
+	shunt        func() *pmForwarder
 	probeID      uint64
 	probeStarted time.Time
 }
@@ -246,6 +249,7 @@ func (m *controllerMappings) reconcile(rules []forwardRule) map[string]string {
 			if a.forward == nil {
 				f := newPMForwarder(m.ctx, m.sender, r.Target)
 				f.allowSource = func(addr net.Addr) bool { return ruleAllowsSource(r, addr) }
+				f.shunt = m.shunt
 				if e := f.bind(r.Listen); e != nil {
 					f.close()
 					parts = append(parts, "TCP 监听失败: "+e.Error())

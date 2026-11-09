@@ -20,6 +20,10 @@ type guiConnectionConfig struct {
 	AllowClient   string `json:"allow_client,omitempty"`
 	Enabled       bool   `json:"enabled,omitempty"`
 	ConnectOnOpen bool   `json:"connect_on_open"`
+	// Aggregation enables parallel WebRTC associations for TCP mappings:
+	// 0 keeps the legacy single association, 1-16 are accepted. UDP rules
+	// (game traffic) never use aggregated associations.
+	Aggregation int `json:"aggregation,omitempty"`
 }
 
 func (g *guiServer) connectionPath() string {
@@ -77,7 +81,7 @@ func (g *guiServer) startConnectionMode(probeOnly bool) error {
 		}
 		return nil
 	}
-	_, e := g.connectionConfig()
+	connCfg, e := g.connectionConfig()
 	if e != nil {
 		return e
 	}
@@ -126,6 +130,16 @@ func (g *guiServer) startConnectionMode(probeOnly bool) error {
 	cmd.WaitDelay = time.Second
 	cmd.Stdout = output
 	cmd.Stderr = output
+	// Forward the user's TCP aggregation preference to the engine. UDP rules
+	// (game traffic) are unaffected: they never use aggregated associations.
+	agg := connCfg.Aggregation
+	if agg < 0 {
+		agg = 0
+	}
+	if agg > 16 {
+		agg = 16
+	}
+	cmd.Env = append(os.Environ(), "UU_TCP_AGGREGATION="+strconv.Itoa(agg))
 	stopEngine, e := startAppEngine(cmd)
 	if e != nil {
 		output.Close()
@@ -250,5 +264,24 @@ func (g *guiServer) setConnectOnOpen(on bool) error {
 		return e
 	}
 	c.ConnectOnOpen = on
+	return atomicControllerJSON(g.connectionPath(), c)
+}
+
+// setAggregation persists the user's TCP association preference. The change
+// takes effect the next time the connection starts. UDP rules (game traffic)
+// are never affected by this setting.
+func (g *guiServer) setAggregation(n int) error {
+	if n < 0 || n > 16 {
+		return fmt.Errorf("聚合条数需在 0-16 之间")
+	}
+	c, e := g.connectionConfig()
+	if os.IsNotExist(e) {
+		e = nil
+		c.Enabled = false
+	}
+	if e != nil {
+		return e
+	}
+	c.Aggregation = n
 	return atomicControllerJSON(g.connectionPath(), c)
 }
