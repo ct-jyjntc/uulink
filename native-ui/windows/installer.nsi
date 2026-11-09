@@ -83,7 +83,7 @@ Section "UU Link"
   ${If} $1 == 0
     InitPluginsDir
     SetOutPath "$PLUGINSDIR"
-    File "/oname=MicrosoftEdgeWebview2Setup.exe" "${BOOTSTRAPPER}"
+    File "/oname=MicrosoftEdgeWebview2Setup.exe" "MicrosoftEdgeWebview2Setup.exe"
     ExecWait '"$PLUGINSDIR\MicrosoftEdgeWebview2Setup.exe" /silent /install' $0
     Call CheckRuntime
     ${If} $1 == 0
@@ -96,10 +96,12 @@ Section "UU Link"
   ClearErrors
   SetOutPath "$INSTDIR"
   SetOverwrite on
-  File "${STAGE}/UU Link.exe"
-  File "${STAGE}/uulink-engine.exe"
-  File "${STAGE}/THIRD_PARTY_NOTICES.txt"
-  File "${STAGE}/README.txt"
+  ; Some makensis builds mishandle source paths containing spaces, so the
+  ; GUI executable is staged under a space-free name and renamed on install.
+  File "/oname=UU Link.exe" "UULinkGUI.exe"
+  File "uulink-engine.exe"
+  File "THIRD_PARTY_NOTICES.txt"
+  File "README.txt"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   ${If} ${Errors}
     SetErrorLevel 1
